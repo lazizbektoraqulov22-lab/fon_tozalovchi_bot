@@ -1,3 +1,2 @@
 aiogram
-rembg[cpu]
-Pillow
+aiohttp
