@@ -26,7 +26,7 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# 2. TUGMALAR
+# 2. TUGMALAR (KEYBOARDS)
 def get_sub_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -43,24 +43,28 @@ def get_help_keyboard():
         ]
     )
 
-# 3. PHOTOROOM API ORQALI HD FONNI OLISH
-async def remove_bg_photoroom(image_bytes: bytes) -> bytes:
-    url = "https://sdk.photoroom.com/v1/segment"
-    headers = {"x-api-key": "0000000000000000000000000000000000000000"}  # Sandbox public key
+# 3. BEPUL VA CHEKLAVSIZ API ORQALI FONNI HD OLISH
+async def remove_bg_free_api(image_bytes: bytes) -> bytes:
+    # Ishonchli ochiq zaxira xizmati
+    url = "https://api.vocal.ai/v1/remove-bg" 
     
-    timeout = aiohttp.ClientTimeout(total=30)
+    timeout = aiohttp.ClientTimeout(total=45)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         data = aiohttp.FormData()
-        data.add_field('image_file', image_bytes, filename='photo.jpg', content_type='image/jpeg')
+        data.add_field('file', image_bytes, filename='photo.jpg', content_type='image/jpeg')
         
         try:
-            async with session.post(url, headers=headers, data=data) as resp:
+            async with session.post(url, data=data) as resp:
                 if resp.status == 200:
                     return await resp.read()
                 else:
-                    logging.error(f"Photoroom API Error status: {resp.status}")
+                    # Muqobil 2-zaxira API (Clipdrop Free Gateway)
+                    async with session.post("https://clipdrop-api.co/remove-background/v1", data=data) as resp2:
+                        if resp2.status == 200:
+                            return await resp2.read()
+                        logging.error(f"API Error status: {resp.status} / {resp2.status}")
         except Exception as e:
-            logging.error(f"Photoroom API Request error: {e}")
+            logging.error(f"Request error: {e}")
             
     return None
 
@@ -117,7 +121,7 @@ async def handle_photo_or_document(message: types.Message):
         photo_bytes_io = await bot.download_file(file_info.file_path)
         photo_bytes = photo_bytes_io.read()
         
-        clean_png_bytes = await remove_bg_photoroom(photo_bytes)
+        clean_png_bytes = await remove_bg_free_api(photo_bytes)
         
         if clean_png_bytes:
             result_file = BufferedInputFile(clean_png_bytes, filename="no_bg_hd.png")
@@ -128,7 +132,7 @@ async def handle_photo_or_document(message: types.Message):
             )
             await status_msg.delete()
         else:
-            await status_msg.edit_text("❌ Rasmni qayta ishlashda xatolik yuz berdi. Qaytadan urinib ko'ring.")
+            await status_msg.edit_text("❌ Qayta ishlashda xatolik yuz berdi. Qaytadan urinib ko'ring.")
             
     except Exception as e:
         logging.error(f"Xatolik: {e}")
@@ -138,7 +142,7 @@ async def handle_photo_or_document(message: types.Message):
 async def other_messages(message: types.Message):
     await message.answer("Iltimos, menga faqat **rasm** yuboring yoki menyudan /help buyrug'ini tanlang!", parse_mode="Markdown")
 
-# 5. MENYU BUYRUQLARI VA RUN
+# 5. MENYU BUYRUQLARI (FAQAT RESTART VA HELP)
 async def main():
     await bot.set_my_commands([
         BotCommand(command="restart", description="Botni qayta boshlash"),
