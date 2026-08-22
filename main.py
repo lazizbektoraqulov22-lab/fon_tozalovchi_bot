@@ -13,12 +13,11 @@ from aiogram.types import (
     BotCommand
 )
 
-# 1. BOT SOZLAMALARI VA SOZLAMALAR
+# 1. BOT SOZLAMALARI
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 REMOVE_BG_API_KEY = os.getenv("REMOVE_BG_API_KEY")
 CLIPDROP_API_KEY = os.getenv("CLIPDROP_API_KEY")
 
-# Telegram kanal va admin sozlamalari
 CHANNEL_USERNAME = "@stories_686"
 CHANNEL_LINK = "https://t.me/stories_686"
 ADMIN_LINK = "https://t.me/umidmurodov"
@@ -31,7 +30,7 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# 2. REAL TELEGRAM OBUNASINI TEKSHIRISH FUNKSIYASI
+# 2. XATOLIKLARDAN HIMOYALANGAN OBUNA TEKSHIRUVI
 async def check_user_sub(user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
@@ -39,8 +38,9 @@ async def check_user_sub(user_id: int) -> bool:
             return True
         return False
     except Exception as e:
-        logging.error(f"Obuna tekshirishda xatlik (bot kanalda admin ekanini tekshiring): {e}")
-        return False
+        logging.error(f"Obuna tekshirish xatosi (Bot kanalda admin ekanini tekshiring): {e}")
+        # Agar bot kanalda admin bo'lmasa, bot qotib qolmasligi uchun vaqtincha ruxsat beradi
+        return True
 
 # 3. TUGMALAR
 def get_sub_keyboard():
@@ -138,7 +138,6 @@ async def check_sub_callback(callback: CallbackQuery):
 async def handle_photo_or_document(message: types.Message):
     is_sub = await check_user_sub(message.from_user.id)
     
-    # Obuna bo'lmagan bo'lsa rasmni qayta ishlamaydi
     if not is_sub:
         await message.answer(
             "🛑 **Rasmga ishlov berilmadi!**\n\n"
