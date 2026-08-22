@@ -1,9 +1,7 @@
 import os
 import asyncio
 import logging
-from io import BytesIO
-from PIL import Image
-from rembg import remove
+import aiohttp
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
@@ -28,7 +26,7 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# 2. TUGMALAR (KEYBOARDS)
+# 2. TUGMALAR
 def get_sub_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -45,16 +43,28 @@ def get_help_keyboard():
         ]
     )
 
-# 3. RASM FONINI HD SIFATDA OLIB TASHALASH
-def remove_bg_local(image_bytes: bytes) -> bytes:
-    input_image = Image.open(BytesIO(image_bytes))
-    output_image = remove(input_image)
+# 3. PHOTOROOM API ORQALI HD FONNI OLISH
+async def remove_bg_photoroom(image_bytes: bytes) -> bytes:
+    url = "https://sdk.photoroom.com/v1/segment"
+    headers = {"x-api-key": "0000000000000000000000000000000000000000"}  # Sandbox public key
     
-    output_io = BytesIO()
-    output_image.save(output_io, format="PNG")
-    return output_io.getvalue()
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        data = aiohttp.FormData()
+        data.add_field('image_file', image_bytes, filename='photo.jpg', content_type='image/jpeg')
+        
+        try:
+            async with session.post(url, headers=headers, data=data) as resp:
+                if resp.status == 200:
+                    return await resp.read()
+                else:
+                    logging.error(f"Photoroom API Error status: {resp.status}")
+        except Exception as e:
+            logging.error(f"Photoroom API Request error: {e}")
+            
+    return None
 
-# 4. BUYRUQLAR HANDLERLARI
+# 4. HANDLERLAR
 @dp.message(CommandStart())
 @dp.message(Command("restart"))
 async def start_and_restart_cmd(message: types.Message):
@@ -74,8 +84,10 @@ async def help_cmd(message: types.Message):
 
 @dp.callback_query(F.data == "check_sub")
 async def check_sub_callback(callback: CallbackQuery):
-    alert_text = "⚠️ Iltimos, avval Instagram sahifamizga kirib obuna bo'ling, so'ngra botdan foydalanishingiz mumkin!"
-    await callback.answer(alert_text, show_alert=True)
+    await callback.answer(
+        "⚠️ Iltimos, avval Instagram sahifamizga kirib obuna bo'ling, so'ngra botdan foydalanishingiz mumkin!", 
+        show_alert=True
+    )
     
     try:
         await callback.message.delete()
@@ -88,7 +100,6 @@ async def check_sub_callback(callback: CallbackQuery):
         parse_mode="Markdown"
     )
 
-# 5. RASMLARNI QABUL QILISH
 @dp.message(F.photo | F.document)
 async def handle_photo_or_document(message: types.Message):
     status_msg = await message.answer("⚡ **Rasm foni HD sifatda tozalanmoqda, kuting...**", parse_mode="Markdown")
@@ -106,7 +117,7 @@ async def handle_photo_or_document(message: types.Message):
         photo_bytes_io = await bot.download_file(file_info.file_path)
         photo_bytes = photo_bytes_io.read()
         
-        clean_png_bytes = await asyncio.to_thread(remove_bg_local, photo_bytes)
+        clean_png_bytes = await remove_bg_photoroom(photo_bytes)
         
         if clean_png_bytes:
             result_file = BufferedInputFile(clean_png_bytes, filename="no_bg_hd.png")
@@ -117,19 +128,18 @@ async def handle_photo_or_document(message: types.Message):
             )
             await status_msg.delete()
         else:
-            await status_msg.edit_text("❌ Rasmni qayta ishlashda xatolik yuz berdi.")
+            await status_msg.edit_text("❌ Rasmni qayta ishlashda xatolik yuz berdi. Qaytadan urinib ko'ring.")
             
     except Exception as e:
         logging.error(f"Xatolik: {e}")
-        await status_msg.edit_text("❌ Rasmni qayta ishlashda xatolik yuz berdi.")
+        await status_msg.edit_text("❌ Qayta ishlashda xatolik yuz berdi.")
 
 @dp.message()
 async def other_messages(message: types.Message):
     await message.answer("Iltimos, menga faqat **rasm** yuboring yoki menyudan /help buyrug'ini tanlang!", parse_mode="Markdown")
 
-# 6. ISHGA TUSHIRISH VA MENYU BUYRUQLARI
+# 5. MENYU BUYRUQLARI VA RUN
 async def main():
-    # Menyu buyruqlarida faqat /restart va /help bo'ladi
     await bot.set_my_commands([
         BotCommand(command="restart", description="Botni qayta boshlash"),
         BotCommand(command="help", description="Admin bilan bog'lanish")
