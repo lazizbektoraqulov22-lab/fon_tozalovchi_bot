@@ -1,9 +1,7 @@
 import os
 import asyncio
 import logging
-from io import BytesIO
-from PIL import Image
-from rembg import remove
+import aiohttp
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
@@ -15,7 +13,6 @@ from aiogram.types import (
     BotCommand
 )
 
-# 1. BOT SOZLAMALARI
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 INSTAGRAM_LINK = "https://www.instagram.com/murodovvv_686"
 TELEGRAM_LINK = "https://t.me/umidmurodov"
@@ -28,7 +25,6 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# 2. TUGMALAR
 def get_sub_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -45,91 +41,41 @@ def get_help_keyboard():
         ]
     )
 
-# 3. HECH QANDAY API KALITSIZ BG REMOVER (LOCAL AI MODEL)
-def process_remove_bg(image_bytes: bytes) -> bytes:
-    input_img = Image.open(BytesIO(image_bytes))
-    output_img = remove(input_img)
-    
-    out_buffer = BytesIO()
-    output_img.save(out_buffer, format="PNG")
-    return out_buffer.getvalue()
-
-# 4. HANDLERLAR
 @dp.message(CommandStart())
 @dp.message(Command("restart"))
 async def start_and_restart_cmd(message: types.Message):
     welcome_text = (
-        "👋 **Salom! Men rasmlar fonini HD sifatda tozalovchi botman.**\n\n"
+        "👋 **Salom! Men rasmlar fonini tozalovchi botman.**\n\n"
         "Botdan foydalanish uchun avval Instagram sahifamizga obuna bo'ling!"
     )
     await message.answer(welcome_text, reply_markup=get_sub_keyboard(), parse_mode="Markdown")
 
 @dp.message(Command("help"))
 async def help_cmd(message: types.Message):
-    help_text = (
-        "🛠 **Yordam bo'limi**\n\n"
-        "Nima muammo bo'lsa admin bilan bog'laning:"
-    )
+    help_text = "🛠 **Yordam bo'limi**\n\nNima muammo bo'lsa admin bilan bog'laning:"
     await message.answer(help_text, reply_markup=get_help_keyboard(), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "check_sub")
 async def check_sub_callback(callback: CallbackQuery):
-    await callback.answer(
-        "⚠️ Iltimos, avval Instagram sahifamizga kirib obuna bo'ling, so'ngra botdan foydalanishingiz mumkin!", 
-        show_alert=True
-    )
-    
+    await callback.answer("⚠️ Avval Instagram'ga obuna bo'ling!", show_alert=True)
     try:
         await callback.message.delete()
     except Exception:
         pass
         
     await callback.message.answer(
-        "📸 **Rahmat! Endi menga fonini olib tashlamoqchi bo'lgan rasmingizni yuboring.**\n"
-        "*(Sifat buzilmasligi uchun rasmni Hujjat ko'rinishida yuborishingiz ham mumkin)*", 
+        "📸 **Rahmat! Endi menga fonini olib tashlamoqchi bo'lgan rasmingizni yuboring.**", 
         parse_mode="Markdown"
     )
 
 @dp.message(F.photo | F.document)
 async def handle_photo_or_document(message: types.Message):
-    status_msg = await message.answer("⚡ **Rasm foni HD sifatda tozalanmoqda, kuting...**", parse_mode="Markdown")
-    
-    try:
-        if message.photo:
-            file_id = message.photo[-1].file_id
-        elif message.document and message.document.mime_type.startswith("image/"):
-            file_id = message.document.file_id
-        else:
-            await status_msg.edit_text("❌ Iltimos, faqat rasm fayli yuboring!")
-            return
-
-        file_info = await bot.get_file(file_id)
-        photo_bytes_io = await bot.download_file(file_info.file_path)
-        photo_bytes = photo_bytes_io.read()
-        
-        # AI modelni alohida thread'da ishga tushiramiz
-        clean_png_bytes = await asyncio.to_thread(process_remove_bg, photo_bytes)
-        
-        if clean_png_bytes:
-            result_file = BufferedInputFile(clean_png_bytes, filename="no_bg_hd.png")
-            await message.answer_document(
-                document=result_file, 
-                caption="✅ **Rasmingiz foni muvaffaqiyatli va HD sifatda tozalandi!**",
-                parse_mode="Markdown"
-            )
-            await status_msg.delete()
-        else:
-            await status_msg.edit_text("❌ Rasmni qayta ishlashda xatolik bo'ldi.")
-            
-    except Exception as e:
-        logging.error(f"Xatolik: {e}")
-        await status_msg.edit_text("❌ Qayta ishlashda xatolik yuz berdi.")
+    await message.answer("⚠️ Botingiz xavfsiz rejimda ishlamoqda. Rasm fonini qayta ishlash uchun Render Environment bo'limiga API kalit kiritishingiz kerak.", parse_mode="Markdown")
 
 @dp.message()
 async def other_messages(message: types.Message):
-    await message.answer("Iltimos, menga faqat **rasm** yuboring yoki menyudan /help buyrug'ini tanlang!", parse_mode="Markdown")
+    await message.answer("Iltimos, menyudan /help buyrug'ini tanlang!", parse_mode="Markdown")
 
-# 5. MENYU BUYRUQLARI (FAQAT RESTART VA HELP)
 async def main():
     await bot.set_my_commands([
         BotCommand(command="restart", description="Botni qayta boshlash"),
