@@ -1,7 +1,9 @@
 import os
 import asyncio
 import logging
-import aiohttp
+from io import BytesIO
+from PIL import Image
+from rembg import remove
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
@@ -15,7 +17,6 @@ from aiogram.types import (
 
 # 1. BOT SOZLAMALARI
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 INSTAGRAM_LINK = "https://www.instagram.com/murodovvv_686"
 TELEGRAM_LINK = "https://t.me/umidmurodov"
 
@@ -44,46 +45,14 @@ def get_help_keyboard():
         ]
     )
 
-# 3. RO'YXATDAN O'TISHSIZ VA API KALITSIZ BG REMOVER (SnapEdit Engine)
-async def remove_bg_no_api(image_bytes: bytes) -> bytes:
-    # SnapEdit ochiq AI servisi
-    url = "https://api.snapedit.app/api/v1/remove-bg"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://snapedit.app/"
-    }
+# 3. HECH QANDAY API KALITSIZ BG REMOVER (LOCAL AI MODEL)
+def process_remove_bg(image_bytes: bytes) -> bytes:
+    input_img = Image.open(BytesIO(image_bytes))
+    output_img = remove(input_img)
     
-    timeout = aiohttp.ClientTimeout(total=45)
-    async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-        data = aiohttp.FormData()
-        data.add_field('file', image_bytes, filename='photo.jpg', content_type='image/jpeg')
-        
-        try:
-            async with session.post(url, data=data) as resp:
-                if resp.status == 200:
-                    json_res = await resp.json()
-                    # Agar API javobida rasm URL qaytsa, uning o'zini yuklab olamiz
-                    if json_res.get("status") == 1 and "data" in json_res:
-                        img_url = json_res["data"].get("image_url") or json_res["data"].get("url")
-                        if img_url:
-                            async with session.get(img_url) as img_resp:
-                                if img_resp.status == 200:
-                                    return await img_resp.read()
-                
-                # Zaxira server (Photoroom public direct engine)
-                pr_url = "https://sdk.photoroom.com/v1/segment"
-                pr_headers = {"x-api-key": "freemium"}
-                data_pr = aiohttp.FormData()
-                data_pr.add_field('image_file', image_bytes, filename='photo.jpg', content_type='image/jpeg')
-                
-                async with session.post(pr_url, headers=pr_headers, data=data_pr) as resp_pr:
-                    if resp_pr.status == 200:
-                        return await resp_pr.read()
-                        
-        except Exception as e:
-            logging.error(f"Remove BG Engine Error: {e}")
-            
-    return None
+    out_buffer = BytesIO()
+    output_img.save(out_buffer, format="PNG")
+    return out_buffer.getvalue()
 
 # 4. HANDLERLAR
 @dp.message(CommandStart())
@@ -138,7 +107,8 @@ async def handle_photo_or_document(message: types.Message):
         photo_bytes_io = await bot.download_file(file_info.file_path)
         photo_bytes = photo_bytes_io.read()
         
-        clean_png_bytes = await remove_bg_no_api(photo_bytes)
+        # AI modelni alohida thread'da ishga tushiramiz
+        clean_png_bytes = await asyncio.to_thread(process_remove_bg, photo_bytes)
         
         if clean_png_bytes:
             result_file = BufferedInputFile(clean_png_bytes, filename="no_bg_hd.png")
@@ -149,7 +119,7 @@ async def handle_photo_or_document(message: types.Message):
             )
             await status_msg.delete()
         else:
-            await status_msg.edit_text("❌ Rasm fonini tozalashda xatolik bo'ldi. Qaytadan boshqa rasm yuborib ko'ring.")
+            await status_msg.edit_text("❌ Rasmni qayta ishlashda xatolik bo'ldi.")
             
     except Exception as e:
         logging.error(f"Xatolik: {e}")
