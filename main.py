@@ -13,13 +13,15 @@ from aiogram.types import (
     BotCommand
 )
 
-# 1. BOT SOZLAMALARI
+# 1. BOT SOZLAMALARI VA SOZLAMALAR
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 REMOVE_BG_API_KEY = os.getenv("REMOVE_BG_API_KEY")
 CLIPDROP_API_KEY = os.getenv("CLIPDROP_API_KEY")
 
-INSTAGRAM_LINK = "https://www.instagram.com/murodovvv_686"
-TELEGRAM_LINK = "https://t.me/umidmurodov"
+# Telegram kanal va admin sozlamalari
+CHANNEL_USERNAME = "@stories_686"
+CHANNEL_LINK = "https://t.me/stories_686"
+ADMIN_LINK = "https://t.me/umidmurodov"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -29,27 +31,35 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Obuna bo'lgan foydalanuvchilar ro'yxati (xotirada saqlash)
-SUBSCRIBED_USERS = set()
+# 2. REAL TELEGRAM OBUNASINI TEKSHIRISH FUNKSIYASI
+async def check_user_sub(user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        if member.status in ["member", "administrator", "creator"]:
+            return True
+        return False
+    except Exception as e:
+        logging.error(f"Obuna tekshirishda xatlik (bot kanalda admin ekanini tekshiring): {e}")
+        return False
 
-# 2. TUGMALAR
+# 3. TUGMALAR
 def get_sub_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📸 Instagram'ga obuna bo'lish", url=INSTAGRAM_LINK)],
-            [InlineKeyboardButton(text="✅ Obuna bo'ldim / Tekshirish", callback_data="check_sub")]
+            [InlineKeyboardButton(text="📢 Kanalga obuna bo'lish", url=CHANNEL_LINK)],
+            [InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="check_sub")]
         ]
     )
 
 def get_help_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📸 Instagram Admin", url=INSTAGRAM_LINK)],
-            [InlineKeyboardButton(text="💬 Telegram Admin", url=TELEGRAM_LINK)]
+            [InlineKeyboardButton(text="📢 Rasmiy kanal", url=CHANNEL_LINK)],
+            [InlineKeyboardButton(text="💬 Admin bilan bog'lanish", url=ADMIN_LINK)]
         ]
     )
 
-# 3. API ORQALI FONNI TOZALASH
+# 4. API ORQALI FONNI TOZALASH
 async def process_remove_bg(image_bytes: bytes) -> bytes:
     timeout = aiohttp.ClientTimeout(total=45)
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -83,19 +93,23 @@ async def process_remove_bg(image_bytes: bytes) -> bytes:
 
     return None
 
-# 4. HANDLERLAR
+# 5. HANDLERLAR
 @dp.message(CommandStart())
 @dp.message(Command("restart"))
 async def start_and_restart_cmd(message: types.Message):
-    user_id = message.from_user.id
-    if user_id in SUBSCRIBED_USERS:
-        SUBSCRIBED_USERS.remove(user_id) # Qayta restart berganda obunani qayta so'raydi
-        
-    welcome_text = (
-        "👋 **Salom! Men rasmlar fonini HD sifatda tozalovchi botman.**\n\n"
-        "⚠️ **Botdan foydalanish uchun avval Instagram sahifamizga obuna bo'ling va pastdagi 'Tekshirish' tugmasini bosing!**"
-    )
-    await message.answer(welcome_text, reply_markup=get_sub_keyboard(), parse_mode="Markdown")
+    is_sub = await check_user_sub(message.from_user.id)
+    
+    if is_sub:
+        await message.answer(
+            "👋 **Salom! Botdan foydalanishingiz mumkin.**\n\nMenga fonini olib tashlamoqchi bo'lgan rasmingizni yuboring!", 
+            parse_mode="Markdown"
+        )
+    else:
+        welcome_text = (
+            "👋 **Salom! Men rasmlar fonini HD sifatda tozalovchi botman.**\n\n"
+            "⚠️ Botdan foydalanish uchun avval **Telegram kanalimizga obuna bo'ling** va 'Obunani tekshirish' tugmasini bosing!"
+        )
+        await message.answer(welcome_text, reply_markup=get_sub_keyboard(), parse_mode="Markdown")
 
 @dp.message(Command("help"))
 async def help_cmd(message: types.Message):
@@ -104,31 +118,31 @@ async def help_cmd(message: types.Message):
 
 @dp.callback_query(F.data == "check_sub")
 async def check_sub_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    SUBSCRIBED_USERS.add(user_id)
+    is_sub = await check_user_sub(callback.from_user.id)
     
-    await callback.answer("✅ Obuna tasdiqlandi!", show_alert=False)
-    
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
-        
-    await callback.message.answer(
-        "📸 **Rahmat! Obuna tasdiqlandi.**\n\n"
-        "Endi menga fonini olib tashlamoqchi bo'lgan rasmingizni yuboring!", 
-        parse_mode="Markdown"
-    )
+    if is_sub:
+        await callback.answer("✅ Obunangiz tasdiqlandi!", show_alert=True)
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+            
+        await callback.message.answer(
+            "📸 **Rahmat! Obuna tasdiqlandi.**\n\nEndi menga fonini olib tashlamoqchi bo'lgan rasmingizni yuboring!", 
+            parse_mode="Markdown"
+        )
+    else:
+        await callback.answer("❌ Siz hali kanalga obuna bo'lmadingiz!", show_alert=True)
 
 @dp.message(F.photo | F.document)
 async def handle_photo_or_document(message: types.Message):
-    user_id = message.from_user.id
+    is_sub = await check_user_sub(message.from_user.id)
     
     # Obuna bo'lmagan bo'lsa rasmni qayta ishlamaydi
-    if user_id not in SUBSCRIBED_USERS:
+    if not is_sub:
         await message.answer(
-            "🛑 **Rasmga ishlov berish to'xtatildi!**\n\n"
-            "Botdan foydalanish uchun avval Instagram sahifamizga obuna bo'lib, **'✅ Obuna bo'ldim / Tekshirish'** tugmasini bosing!",
+            "🛑 **Rasmga ishlov berilmadi!**\n\n"
+            "Botdan foydalanish uchun avval Telegram kanalimizga obuna bo'lishingiz shart!",
             reply_markup=get_sub_keyboard(),
             parse_mode="Markdown"
         )
@@ -155,7 +169,7 @@ async def handle_photo_or_document(message: types.Message):
             result_file = BufferedInputFile(clean_png_bytes, filename="no_bg_hd.png")
             await message.answer_document(
                 document=result_file, 
-                caption="✅ **Rasmingiz foni muvaffaqiyatli va HD sifatda tozalandi!**",
+                caption="✅ **Rasmingiz foni muvaffaqiyatli tozalandi!**",
                 parse_mode="Markdown"
             )
             await status_msg.delete()
@@ -168,7 +182,7 @@ async def handle_photo_or_document(message: types.Message):
 
 @dp.message()
 async def other_messages(message: types.Message):
-    await message.answer("Iltimos, menga faqat **rasm** yuboring yoki menyudan /help buyrug'ini tanlang!", parse_mode="Markdown")
+    await message.answer("Iltimos, menga faqat **rasm** yuboring!", parse_mode="Markdown")
 
 async def main():
     await bot.set_my_commands([
