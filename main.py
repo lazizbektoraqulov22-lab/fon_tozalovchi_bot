@@ -1,8 +1,8 @@
 import os
 import asyncio
 import logging
-import aiohttp
-
+import io
+ 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import (
@@ -12,24 +12,28 @@ from aiogram.types import (
     CallbackQuery,
     BotCommand
 )
-
+ 
+from rembg import remove, new_session
+from PIL import Image
+ 
 # 1. BOT SOZLAMALARI
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-REMOVE_BG_API_KEY = os.getenv("REMOVE_BG_API_KEY")
-CLIPDROP_API_KEY = os.getenv("CLIPDROP_API_KEY")
-
+ 
 CHANNEL_USERNAME = "@stories_686"
 CHANNEL_LINK = "https://t.me/stories_686"
 ADMIN_LINK = "https://t.me/umidmurodov"
-
+ 
 logging.basicConfig(level=logging.INFO)
-
+ 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN topilmadi!")
-
+ 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
+ 
+# Rembg sessiyasi - bot ishga tushganda BIR MARTA yuklanadi
+rembg_session = new_session("u2net")
+ 
 # 2. XATOLIKLARDAN HIMOYALANGAN OBUNA TEKSHIRUVI
 async def check_user_sub(user_id: int) -> bool:
     try:
@@ -39,9 +43,8 @@ async def check_user_sub(user_id: int) -> bool:
         return False
     except Exception as e:
         logging.error(f"Obuna tekshirish xatosi (Bot kanalda admin ekanini tekshiring): {e}")
-        # Agar bot kanalda admin bo'lmasa, bot qotib qolmasligi uchun vaqtincha ruxsat beradi
         return True
-
+ 
 # 3. TUGMALAR
 def get_sub_keyboard():
     return InlineKeyboardMarkup(
@@ -50,7 +53,7 @@ def get_sub_keyboard():
             [InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="check_sub")]
         ]
     )
-
+ 
 def get_help_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -58,41 +61,23 @@ def get_help_keyboard():
             [InlineKeyboardButton(text="💬 Admin bilan bog'lanish", url=ADMIN_LINK)]
         ]
     )
-
-# 4. API ORQALI FONNI TOZALASH
+ 
+# 4. FONNI MAHALLIY (BEPUL, CHEKSIZ) TOZALASH - rembg orqali
+def _remove_bg_sync(image_bytes: bytes) -> bytes:
+    output_bytes = remove(image_bytes, session=rembg_session)
+    img = Image.open(io.BytesIO(output_bytes)).convert("RGBA")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+ 
 async def process_remove_bg(image_bytes: bytes) -> bytes:
-    timeout = aiohttp.ClientTimeout(total=45)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        
-        if REMOVE_BG_API_KEY:
-            url = "https://api.remove.bg/v1.0/removebg"
-            headers = {"X-Api-Key": REMOVE_BG_API_KEY}
-            data = aiohttp.FormData()
-            data.add_field('image_file', image_bytes, filename='photo.jpg', content_type='image/jpeg')
-            data.add_field('size', 'auto')
-            
-            try:
-                async with session.post(url, headers=headers, data=data) as resp:
-                    if resp.status == 200:
-                        return await resp.read()
-            except Exception as e:
-                logging.error(f"Remove.bg xatosi: {e}")
-
-        if CLIPDROP_API_KEY:
-            url = "https://clipdrop-api.co/remove-background/v1"
-            headers = {"x-api-key": CLIPDROP_API_KEY}
-            data = aiohttp.FormData()
-            data.add_field('image_file', image_bytes, filename='photo.jpg', content_type='image/jpeg')
-            
-            try:
-                async with session.post(url, headers=headers, data=data) as resp:
-                    if resp.status == 200:
-                        return await resp.read()
-            except Exception as e:
-                logging.error(f"Clipdrop xatosi: {e}")
-
-    return None
-
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(None, _remove_bg_sync, image_bytes)
+    except Exception as e:
+        logging.error(f"rembg xatosi: {e}")
+        return None
+ 
 # 5. HANDLERLAR
 @dp.message(CommandStart())
 @dp.message(Command("restart"))
@@ -110,12 +95,12 @@ async def start_and_restart_cmd(message: types.Message):
             "⚠️ Botdan foydalanish uchun avval **Telegram kanalimizga obuna bo'ling** va 'Obunani tekshirish' tugmasini bosing!"
         )
         await message.answer(welcome_text, reply_markup=get_sub_keyboard(), parse_mode="Markdown")
-
+ 
 @dp.message(Command("help"))
 async def help_cmd(message: types.Message):
     help_text = "🛠 **Yordam bo'limi**\n\nNima muammo bo'lsa admin bilan bog'laning:"
     await message.answer(help_text, reply_markup=get_help_keyboard(), parse_mode="Markdown")
-
+ 
 @dp.callback_query(F.data == "check_sub")
 async def check_sub_callback(callback: CallbackQuery):
     is_sub = await check_user_sub(callback.from_user.id)
@@ -133,7 +118,7 @@ async def check_sub_callback(callback: CallbackQuery):
         )
     else:
         await callback.answer("❌ Siz hali kanalga obuna bo'lmadingiz!", show_alert=True)
-
+ 
 @dp.message(F.photo | F.document)
 async def handle_photo_or_document(message: types.Message):
     is_sub = await check_user_sub(message.from_user.id)
@@ -146,8 +131,8 @@ async def handle_photo_or_document(message: types.Message):
             parse_mode="Markdown"
         )
         return
-
-    status_msg = await message.answer("⚡ **Rasm foni HD sifatda tozalanmoqda, kuting...**", parse_mode="Markdown")
+ 
+    status_msg = await message.answer("⚡ **Rasm foni tozalanmoqda, kuting...**", parse_mode="Markdown")
     
     try:
         if message.photo:
@@ -157,7 +142,7 @@ async def handle_photo_or_document(message: types.Message):
         else:
             await status_msg.edit_text("❌ Iltimos, faqat rasm fayli yuboring!")
             return
-
+ 
         file_info = await bot.get_file(file_id)
         photo_bytes_io = await bot.download_file(file_info.file_path)
         photo_bytes = photo_bytes_io.read()
@@ -173,22 +158,22 @@ async def handle_photo_or_document(message: types.Message):
             )
             await status_msg.delete()
         else:
-            await status_msg.edit_text("❌ API xatosi. Key limiti tugagan bo'lishi mumkin.")
+            await status_msg.edit_text("❌ Qayta ishlashda xatolik yuz berdi.")
             
     except Exception as e:
         logging.error(f"Xatolik: {e}")
         await status_msg.edit_text("❌ Qayta ishlashda xatolik yuz berdi.")
-
+ 
 @dp.message()
 async def other_messages(message: types.Message):
     await message.answer("Iltimos, menga faqat **rasm** yuboring!", parse_mode="Markdown")
-
+ 
 async def main():
     await bot.set_my_commands([
         BotCommand(command="restart", description="Botni qayta boshlash"),
         BotCommand(command="help", description="Admin bilan bog'lanish")
     ])
     await dp.start_polling(bot)
-
+ 
 if __name__ == "__main__":
     asyncio.run(main())
