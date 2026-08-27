@@ -79,14 +79,7 @@ def _remove_bg_sync(image_bytes: bytes) -> bytes:
     img_in.convert("RGB").save(buf_in, format="JPEG", quality=90)
     resized_bytes = buf_in.getvalue()
 
-    output_bytes = remove(
-        resized_bytes,
-        session=session,
-        alpha_matting=True,
-        alpha_matting_foreground_threshold=240,
-        alpha_matting_background_threshold=10,
-        alpha_matting_erode_size=10
-    )
+    output_bytes = remove(resized_bytes, session=session)
     img = Image.open(io.BytesIO(output_bytes)).convert("RGBA")
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
