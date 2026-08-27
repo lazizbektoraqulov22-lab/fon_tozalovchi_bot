@@ -1,7 +1,7 @@
 import os
 import asyncio
 import logging
-import io
+import aiohttp
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
@@ -13,11 +13,10 @@ from aiogram.types import (
     BotCommand
 )
 
-from rembg import remove, new_session
-from PIL import Image
-
 # 1. BOT SOZLAMALARI
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+REMOVE_BG_API_KEY = os.getenv("REMOVE_BG_API_KEY")
+CLIPDROP_API_KEY = os.getenv("CLIPDROP_API_KEY")
 
 CHANNEL_USERNAME = "@stories_686"
 CHANNEL_LINK = "https://t.me/stories_686"
@@ -30,15 +29,6 @@ if not BOT_TOKEN:
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
-# Rembg sessiyasi ENDI DARHOL YUKLANMAYDI - faqat birinchi rasm kelganda yuklanadi
-rembg_session = None
-
-def get_session():
-    global rembg_session
-    if rembg_session is None:
-        rembg_session = new_session("u2net")
-    return rembg_session
 
 # 2. XATOLIKLARDAN HIMOYALANGAN OBUNA TEKSHIRUVI
 async def check_user_sub(user_id: int) -> bool:
@@ -68,34 +58,39 @@ def get_help_keyboard():
         ]
     )
 
-# 4. FONNI MAHALLIY (BEPUL, CHEKSIZ) TOZALASH - rembg orqali, kichik rasm o'lchamida
-def _remove_bg_sync(image_bytes: bytes) -> bytes:
-    session = get_session()
-
-    # Xotirani tejash uchun: juda katta rasmlarni oldindan kichraytiramiz
-    img_in = Image.open(io.BytesIO(image_bytes))
-    img_in.thumbnail((1280, 1280))
-    buf_in = io.BytesIO()
-    img_in.convert("RGB").save(buf_in, format="JPEG", quality=90)
-    resized_bytes = buf_in.getvalue()
-
-    output_bytes = remove(resized_bytes, session=session)
-    img = Image.open(io.BytesIO(output_bytes)).convert("RGBA")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    result = buf.getvalue()
-
-    # Xotirani darhol bo'shatish
-    del img_in, img, buf_in, buf, resized_bytes, output_bytes
-    return result
-
+# 4. API ORQALI FONNI TOZALASH
 async def process_remove_bg(image_bytes: bytes) -> bytes:
-    loop = asyncio.get_event_loop()
-    try:
-        return await loop.run_in_executor(None, _remove_bg_sync, image_bytes)
-    except Exception as e:
-        logging.error(f"rembg xatosi: {e}")
-        return None
+    timeout = aiohttp.ClientTimeout(total=45)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        
+        if REMOVE_BG_API_KEY:
+            url = "https://api.remove.bg/v1.0/removebg"
+            headers = {"X-Api-Key": REMOVE_BG_API_KEY}
+            data = aiohttp.FormData()
+            data.add_field('image_file', image_bytes, filename='photo.jpg', content_type='image/jpeg')
+            data.add_field('size', 'auto')
+            
+            try:
+                async with session.post(url, headers=headers, data=data) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+            except Exception as e:
+                logging.error(f"Remove.bg xatosi: {e}")
+
+        if CLIPDROP_API_KEY:
+            url = "https://clipdrop-api.co/remove-background/v1"
+            headers = {"x-api-key": CLIPDROP_API_KEY}
+            data = aiohttp.FormData()
+            data.add_field('image_file', image_bytes, filename='photo.jpg', content_type='image/jpeg')
+            
+            try:
+                async with session.post(url, headers=headers, data=data) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+            except Exception as e:
+                logging.error(f"Clipdrop xatosi: {e}")
+
+    return None
 
 # 5. HANDLERLAR
 @dp.message(CommandStart())
@@ -151,7 +146,7 @@ async def handle_photo_or_document(message: types.Message):
         )
         return
 
-    status_msg = await message.answer("⚡ **Rasm foni tozalanmoqda, kuting...**", parse_mode="Markdown")
+    status_msg = await message.answer("⚡ **Rasm foni HD sifatda tozalanmoqda, kuting...**", parse_mode="Markdown")
     
     try:
         if message.photo:
@@ -177,14 +172,11 @@ async def handle_photo_or_document(message: types.Message):
             )
             await status_msg.delete()
         else:
-            await status_msg.edit_text("❌ Qayta ishlashda xatolik yuz berdi. Birozdan keyin qayta urinib ko'ring.")
+            await status_msg.edit_text("❌ API xatosi. Key limiti tugagan bo'lishi mumkin.")
             
     except Exception as e:
         logging.error(f"Xatolik: {e}")
-        try:
-            await status_msg.edit_text("❌ Qayta ishlashda xatolik yuz berdi. Birozdan keyin qayta urinib ko'ring.")
-        except Exception:
-            pass
+        await status_msg.edit_text("❌ Qayta ishlashda xatolik yuz berdi.")
 
 @dp.message()
 async def other_messages(message: types.Message):
